@@ -14,10 +14,10 @@ parser.add_argument("--user-name", type=str, help="USER name in chat completions
 parser.add_argument("--ai-name", type=str, help="ASSISTANT name in chat completions(default: '\\nASSISTANT: ')", default="\\nASSISTANT: ")
 parser.add_argument("--system-name", type=str, help="SYSTEM name in chat completions(default: '\\nASSISTANT's RULE: ')", default="\\nASSISTANT's RULE: ")
 parser.add_argument("--stop", type=str, help="the end of response in chat completions(default: '</s>')", default="</s>")
-parser.add_argument("--llama-api", type=str, help="Set the address of server.cpp in llama.cpp(default: http://127.0.0.1:8080)", default='http://127.0.0.1:8080')
+parser.add_argument("--llama-api", type=str, help="Set the address of server.cpp in llama.cpp(default: http://127.0.0.1:8080)", default='http://127.0.0.1:9080')
 parser.add_argument("--api-key", type=str, help="Set the api key to allow only few user(default: NULL)", default="")
 parser.add_argument("--host", type=str, help="Set the ip address to listen.(default: 127.0.0.1)", default='127.0.0.1')
-parser.add_argument("--port", type=int, help="Set the port to listen.(default: 8081)", default=8081)
+parser.add_argument("--port", type=int, help="Set the port to listen.(default: 9082)", default=9082)
 
 args = parser.parse_args()
 
@@ -51,12 +51,17 @@ def convert_chat(messages):
 
     return prompt
 
-def make_postData(body, chat=False, stream=False):
+def make_postData(body, chat=False, stream=False, embedding=False):
+    if (body is None): return {}
+
     postData = {}
     if (chat):
         postData["prompt"] = convert_chat(body["messages"])
+    elif (embedding):
+        postData["prompt"] = ""
     else:
         postData["prompt"] = body["prompt"]
+    if(is_present(body, "input")): postData["input"] = body["input"][0]    # For embedding
     if(is_present(body, "temperature")): postData["temperature"] = body["temperature"]
     if(is_present(body, "top_k")): postData["top_k"] = body["top_k"]
     if(is_present(body, "top_p")): postData["top_p"] = body["top_p"]
@@ -73,8 +78,11 @@ def make_postData(body, chat=False, stream=False):
         postData["stop"] = [args.stop]
     else:
         postData["stop"] = []
-    if(is_present(body, "stop")): postData["stop"] += body["stop"]
+    if(is_present(body, "stop")):
+        if (body["stop"] is not None):
+            postData["stop"] += body["stop"]
     postData["n_keep"] = -1
+    if(is_present(body, "n_keep")): postData["n_keep"] = body["n_keep"]    # For embedding
     postData["stream"] = stream
 
     return postData
@@ -146,12 +154,33 @@ def make_resData_stream(data, chat=False, time_now = 0, start=False):
     return resData
 
 
+def make_embedding(data):
+    resData = {
+        "data": [
+            {
+                "embedding": data,
+                "index": 0,
+                "object": "embedding"
+
+            }
+        ],
+        "model": "text-embedding-ada-002",
+        "object": "list",
+        "usage": {
+            "prompt_tokens": 5,
+            "total_tokens": 5
+        }
+    }
+    return resData
+
+
 @app.route('/chat/completions', methods=['POST'])
 @app.route('/v1/chat/completions', methods=['POST'])
 def chat_completions():
     if (args.api_key != "" and request.headers["Authorization"].split()[1] != args.api_key):
         return Response(status=403)
     body = request.get_json()
+    if (body is None): return Response(status=401)
     stream = False
     tokenize = False
     if(is_present(body, "stream")): stream = body["stream"]
@@ -188,6 +217,8 @@ def completion():
     if (args.api_key != "" and request.headers["Authorization"].split()[1] != args.api_key):
         return Response(status=403)
     body = request.get_json()
+    print(body)
+    if (body is None): return Response(status=401)
     stream = False
     tokenize = False
     if(is_present(body, "stream")): stream = body["stream"]
@@ -201,7 +232,7 @@ def completion():
 
     if (not stream):
         data = requests.request("POST", urllib.parse.urljoin(args.llama_api, "/completion"), data=json.dumps(postData))
-        print(data.json())
+        # print(data.json())
         resData = make_resData(data.json(), chat=False, promptToken=promptToken)
         return jsonify(resData)
     else:
@@ -214,6 +245,23 @@ def completion():
                     resData = make_resData_stream(json.loads(decoded_line[6:]), chat=False, time_now=time_now)
                     yield 'data: {}\n'.format(json.dumps(resData))
         return Response(generate(), mimetype='text/event-stream')
+
+
+@app.route('/embeddings', methods=['POST'])
+@app.route('/v1/embeddings', methods=['POST'])
+def embedding():
+    if (args.api_key != "" and request.headers["Authorization"].split()[1] != args.api_key):
+        return Response(status=403)
+    body = request.get_json()
+    print(body)
+    postData = make_postData(body, chat=False, stream=False, embedding=True)
+    embeddings = []
+    embeddingData = requests.request("POST", urllib.parse.urljoin(args.llama_api, "/embedding"), data=json.dumps({"content": postData["input"]})).json()
+    embeddings = embeddingData["embedding"]
+    resData = make_embedding(embeddings)
+    return jsonify(resData)
+
+
 
 if __name__ == '__main__':
     app.run(args.host, port=args.port)
