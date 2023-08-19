@@ -14,7 +14,7 @@ parser.add_argument("--user-name", type=str, help="USER name in chat completions
 parser.add_argument("--ai-name", type=str, help="ASSISTANT name in chat completions(default: '\\nASSISTANT: ')", default="\\nASSISTANT: ")
 parser.add_argument("--system-name", type=str, help="SYSTEM name in chat completions(default: '\\nASSISTANT's RULE: ')", default="\\nASSISTANT's RULE: ")
 parser.add_argument("--stop", type=str, help="the end of response in chat completions(default: '</s>')", default="</s>")
-parser.add_argument("--llama-api", type=str, help="Set the address of server.cpp in llama.cpp(default: http://127.0.0.1:8080)", default='http://127.0.0.1:9080')
+parser.add_argument("--llama-api", type=str, help="Set the address of server.cpp in llama.cpp(default: http://127.0.0.1:9080)", default='http://127.0.0.1:9080')
 parser.add_argument("--api-key", type=str, help="Set the api key to allow only few user(default: NULL)", default="")
 parser.add_argument("--host", type=str, help="Set the ip address to listen.(default: 127.0.0.1)", default='127.0.0.1')
 parser.add_argument("--port", type=int, help="Set the port to listen.(default: 9082)", default=9082)
@@ -52,8 +52,6 @@ def convert_chat(messages):
     return prompt
 
 def make_postData(body, chat=False, stream=False, embedding=False):
-    if (body is None): return {}
-
     postData = {}
     if (chat):
         postData["prompt"] = convert_chat(body["messages"])
@@ -180,7 +178,6 @@ def chat_completions():
     if (args.api_key != "" and request.headers["Authorization"].split()[1] != args.api_key):
         return Response(status=403)
     body = request.get_json()
-    if (body is None): return Response(status=401)
     stream = False
     tokenize = False
     if(is_present(body, "stream")): stream = body["stream"]
@@ -217,8 +214,6 @@ def completion():
     if (args.api_key != "" and request.headers["Authorization"].split()[1] != args.api_key):
         return Response(status=403)
     body = request.get_json()
-    print(body)
-    if (body is None): return Response(status=401)
     stream = False
     tokenize = False
     if(is_present(body, "stream")): stream = body["stream"]
@@ -253,7 +248,6 @@ def embedding():
     if (args.api_key != "" and request.headers["Authorization"].split()[1] != args.api_key):
         return Response(status=403)
     body = request.get_json()
-    print(body)
     postData = make_postData(body, chat=False, stream=False, embedding=True)
     embeddings = []
     embeddingData = requests.request("POST", urllib.parse.urljoin(args.llama_api, "/embedding"), data=json.dumps({"content": postData["input"]})).json()
