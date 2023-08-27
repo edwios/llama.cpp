@@ -190,9 +190,13 @@ void perplexity(llama_context * ctx, const gpt_params & params) {
     const bool is_spm = llama_vocab_type(ctx) == LLAMA_VOCAB_TYPE_SPM;
     const bool add_bos = is_spm;
 
+    auto tim1 = std::chrono::high_resolution_clock::now();
     fprintf(stderr, "%s: tokenizing the input ..\n", __func__);
 
     auto tokens = ::llama_tokenize(ctx, params.prompt, add_bos);
+
+    auto tim2 = std::chrono::high_resolution_clock::now();
+    fprintf(stderr, "%s: tokenization took %g ms\n",__func__,1e-3*std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count());
 
     const int n_chunk_max = tokens.size() / params.n_ctx;
 
@@ -351,6 +355,7 @@ void hellaswag_score(llama_context * ctx, const gpt_params & params) {
     fprintf(stderr, "%s : loaded %zu tasks from prompt.\n", __func__, hs_task_count);
 
     const bool is_spm = llama_vocab_type(ctx) == LLAMA_VOCAB_TYPE_SPM;
+    fprintf(stderr, "================================= is_spm = %d\n", is_spm);
 
     // This is needed as usual for LLaMA models
     const bool add_bos = is_spm;
@@ -391,7 +396,7 @@ void hellaswag_score(llama_context * ctx, const gpt_params & params) {
         hs_data[i].context = prompt_lines[idx*6];
         hs_data[i].gold_ending_idx = std::stoi( prompt_lines[idx*6+1] );
         for (size_t j=0; j < 4; j++) {
-            hs_data[i].ending[j] = " " + prompt_lines[idx*6+2+j];
+            hs_data[i].ending[j] = prompt_lines[idx*6+2+j];
         }
 
         // Delete the selected random example from the prompt
@@ -406,6 +411,8 @@ void hellaswag_score(llama_context * ctx, const gpt_params & params) {
     double acc = 0.0f;
     const int n_vocab = llama_n_vocab(ctx);
 
+    std::vector<std::vector<int>> ending_tokens(4);
+
     std::vector<float> tok_logits(n_vocab);
 
     for (size_t task_idx = 0; task_idx < hs_task_count; task_idx++) {
@@ -413,11 +420,21 @@ void hellaswag_score(llama_context * ctx, const gpt_params & params) {
         std::vector<int> context_embd = ::llama_tokenize(ctx, hs_data[task_idx].context, add_bos);
         size_t context_size = context_embd.size();
 
+        for (int i = 0; i < 4; ++i) {
+            ending_tokens[i] = ::llama_tokenize(ctx, hs_data[task_idx].context + " " + hs_data[task_idx].ending[i], add_bos);
+            for (int k = 0; k < int(context_size); ++k) {
+                if (ending_tokens[i][k] != context_embd[k]) {
+                    fprintf(stderr, "Oops: ending %d of task %d differs from context at position %d\n",i,int(task_idx),k);
+                    break;
+                }
+            }
+        }
+
         // Do the 1st ending
         // In this case we include the context when evaluating
-        auto query_embd = ::llama_tokenize(ctx, hs_data[task_idx].context + hs_data[task_idx].ending[0], add_bos);
+        //auto query_embd = ::llama_tokenize(ctx, hs_data[task_idx].context + hs_data[task_idx].ending[0], add_bos);
+        auto query_embd = ending_tokens[0];
         auto query_size = query_embd.size();
-        //printf("First query: %d\n",(int)query_size);
 
         // Stop if query wont fit the ctx window
         if (query_size > (size_t)params.n_ctx) {
@@ -462,7 +479,8 @@ void hellaswag_score(llama_context * ctx, const gpt_params & params) {
         for (size_t ending_idx = 1; ending_idx < 4; ending_idx++) {
 
             // Tokenize the query
-            query_embd = ::llama_tokenize(ctx, hs_data[task_idx].ending[ending_idx], false);
+            query_embd.resize(ending_tokens[ending_idx].size() - context_size);
+            std::memcpy(query_embd.data(), ending_tokens[ending_idx].data() + context_size, query_embd.size()*sizeof(int));
             query_size = query_embd.size();
 
             // Stop if query wont fit the ctx window
