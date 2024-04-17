@@ -8,7 +8,7 @@
 #define CPPHTTPLIB_NO_EXCEPTIONS 1
 #endif
 
-#include "http2lib.h"
+#include "httplib.h"
 #include "json.hpp"
 
 // auto generated files (update with ./deps.sh)
